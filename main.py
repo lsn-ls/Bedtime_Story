@@ -10,9 +10,9 @@ load_dotenv()
 # Azure OpenAI 客户端初始化
 try:
     client = AzureOpenAI(
-        api_version="2024-12-01-preview",
-        azure_endpoint="https://rj-llm-us-east-2.openai.azure.com/",
-        api_key="27d207295cf547959521bd46c91c8ee7"
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY")
     )
 except Exception as e:
     print(f"初始化Azure OpenAI客户端失败: {str(e)}")
