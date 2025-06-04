@@ -3,6 +3,9 @@ import json
 from datetime import datetime
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+import edge_tts
+import asyncio
+import time
 
 # 加载环境变量
 load_dotenv()
@@ -10,12 +13,12 @@ load_dotenv()
 # Azure OpenAI 客户端初始化
 try:
     client = AzureOpenAI(
-        api_version="xxxx",
-        azure_endpoint="xxxx",
-        api_key="xxxx"
+        api_version="xxxxx",
+        azure_endpoint="xxxxx",
+        api_key="xxxxx"
     )
 except Exception as e:
-    print(f"初始化客户端失败: {str(e)}")
+    print(f"初始化Azure OpenAI客户端失败: {str(e)}")
     exit(1)
 
 # 孩子信息记录文件
@@ -314,6 +317,44 @@ def generate_serial_story_chapter(prompt: str, chapter_num: int, previous_chapte
         print(f"生成章节失败：{str(e)}")
         return None
 
+async def text_to_speech(text: str, output_path: str, voice: str = "zh-CN-XiaoxiaoNeural"):
+    """将文本转换为语音"""
+    try:
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_path)
+        return True
+    except Exception as e:
+        print(f"语音合成失败：{str(e)}")
+        return False
+
+def generate_audio_for_story(story: str, story_type: int, chapter_num: int = None) -> str:
+    """为故事生成语音文件"""
+    # 创建 audio 目录（如果不存在）
+    audio_dir = "audio"
+    if not os.path.exists(audio_dir):
+        os.makedirs(audio_dir)
+    
+    # 生成文件名
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    if story_type == 1:  # 单元剧
+        filename = f"{audio_dir}/story_{timestamp}.mp3"
+    else:  # 连续剧
+        filename = f"{audio_dir}/chapter_{chapter_num}_{timestamp}.mp3"
+    
+    # 选择合适的声音
+    voice = "zh-CN-XiaoxiaoNeural"  # 默认使用晓晓的声音
+    
+    # 合成语音
+    print("\n正在生成语音...")
+    success = asyncio.run(text_to_speech(story, filename, voice))
+    
+    if success:
+        print(f"语音已生成：{filename}")
+        return filename
+    else:
+        print("语音生成失败，请稍后重试。")
+        return None
+
 def main():
     try:
         # 检查是否需要重置信息
@@ -449,6 +490,11 @@ def main():
                         serial_story['current_chapter'] += 1
                         save_serial_story(serial_story)
                         print(f"\n=== 第{serial_story['current_chapter']}章 ===\n{chapter}\n")
+                        
+                        # 生成语音
+                        audio_file = generate_audio_for_story(chapter, story_type, serial_story['current_chapter'])
+                        if audio_file:
+                            print(f"\n你可以用播放器打开 {audio_file} 来听这一章。")
                     return
                 
                 elif choice == 3:  # 查看完整故事
@@ -481,6 +527,11 @@ def main():
             print("\n正在生成故事，请稍候...\n")
             story = generate_story(final_prompt)
             print("=== 睡前故事 ===\n" + story + "\n")
+            
+            # 生成语音
+            audio_file = generate_audio_for_story(story, story_type)
+            if audio_file:
+                print(f"\n你可以用播放器打开 {audio_file} 来听这个故事。")
         
         else:  # 连续剧
             # 开始新的连续剧
@@ -506,6 +557,11 @@ def main():
                 serial_story['chapters'].append(chapter)
                 save_serial_story(serial_story)
                 print("\n=== 第1章 ===\n" + chapter + "\n")
+                
+                # 生成语音
+                audio_file = generate_audio_for_story(chapter, story_type, 1)
+                if audio_file:
+                    print(f"\n你可以用播放器打开 {audio_file} 来听这一章。")
             return
 
     except ValueError as e:
