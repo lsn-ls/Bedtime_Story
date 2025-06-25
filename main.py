@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from openai import AzureOpenAI
+import openai
 from dotenv import load_dotenv
 import edge_tts
 import asyncio
@@ -10,16 +10,11 @@ import time
 # 加载环境变量
 load_dotenv()
 
-# Azure OpenAI 客户端初始化
-try:
-    client = AzureOpenAI(
-        api_version="xxxxx",
-        azure_endpoint="xxxxx",
-        api_key="xxxxx"
-    )
-except Exception as e:
-    print(f"初始化Azure OpenAI客户端失败: {str(e)}")
-    exit(1)
+# Azure OpenAI 配置
+openai.api_type = "azure"
+openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
+openai.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+openai.api_key = os.getenv("AZURE_OPENAI_API_KEY")
 
 # 孩子信息记录文件
 CHILD_INFO_FILE = "child_info.json"
@@ -71,11 +66,11 @@ def load_or_init_child_info() -> tuple:
 # 年龄段判断与提示模板
 def convert_months_to_prompt_info(months: int):
     if months <= 36:
-        return 2, "100 到 300", "- 使用非常简单的词汇和句子\n- 重复句式，有节奏感，适合朗读\n- 内容温柔，没有复杂情节"
+        return 2, "400 到 600", "- 使用非常简单的词汇和句子\n- 重复句式，有节奏感，适合朗读\n- 内容温柔，没有复杂情节"
     elif months <= 60:
-        return 4, "300 到 600", "- 语言简单清晰，加入基础情节\n- 有角色简单互动和因果关系\n- 风格温和、结局温馨"
+        return 4, "600 到 1000", "- 语言简单清晰，加入基础情节\n- 有角色简单互动和因果关系\n- 风格温和、结局温馨"
     else:
-        return 6, "600 到 1000", "- 故事情节稍复杂，加入冲突与解决\n- 增加对话和情感表达\n- 故事结构完整，寓意积极向上"
+        return 6, "1000 到 1500", "- 故事情节稍复杂，加入冲突与解决\n- 增加对话和情感表达\n- 故事结构完整，寓意积极向上"
 
 # Prompt 构建器
 def build_prompt(months: int, character: str, elements: str, setting: str) -> str:
@@ -97,8 +92,8 @@ def generate_story_summaries(prompt: str) -> list:
         print("正在生成故事概要...")
         print("提示：正在连接AI服务，这可能需要几秒钟时间...")
         
-        response = client.chat.completions.create(
-            model="SL-Azure-gpt-4.1-mini",
+        response = openai.ChatCompletion.create(
+            engine=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
             messages=[
                 {"role": "system", "content": "你是一个专业的儿童故事策划人。请确保每个故事概要控制在40-60个字之间。"},
                 {"role": "user", "content": prompt + "\n请根据上述要求生成三个不同方向的故事概要，要求：\n1. 每个概要控制在40-60个字之间\n2. 用数字编号（1. 2. 3.）分别列出三个概要\n3. 每个概要应该包含：主角、场景、主要情节和结局\n4. 确保三个概要风格统一，但内容各不相同\n5. 请仔细检查字数，确保每个概要都在40-60个字之间"}
@@ -223,8 +218,8 @@ def select_story_summary(prompt: str) -> str:
 def generate_story(prompt: str) -> str:
     try:
         print("正在连接Azure OpenAI服务...")
-        response = client.chat.completions.create(
-            model="SL-Azure-gpt-4.1-mini",
+        response = openai.ChatCompletion.create(
+            engine=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
             messages=[
                 {"role": "system", "content": "你是一个温柔的儿童故事作家。"},
                 {"role": "user", "content": prompt}
@@ -302,8 +297,8 @@ def generate_serial_story_chapter(prompt: str, chapter_num: int, previous_chapte
         else:
             chapter_prompt += "\n请继续发展故事情节，注意与前文的连贯性，并为下一章留下伏笔。"
         
-        response = client.chat.completions.create(
-            model="SL-Azure-gpt-4.1",
+        response = openai.ChatCompletion.create(
+            engine=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
             messages=[
                 {"role": "system", "content": "你是一个专业的儿童故事作家，擅长创作连续剧式的故事。请确保故事适合儿童阅读，内容积极向上。"},
                 {"role": "user", "content": chapter_prompt}
@@ -317,43 +312,16 @@ def generate_serial_story_chapter(prompt: str, chapter_num: int, previous_chapte
         print(f"生成章节失败：{str(e)}")
         return None
 
-async def text_to_speech(text: str, output_path: str, voice: str = "zh-CN-XiaoxiaoNeural"):
+async def text_to_speech(text: str, output_file: str):
     """将文本转换为语音"""
     try:
+        # 使用中文女声
+        voice = "zh-CN-XiaoxiaoNeural"
         communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_path)
-        return True
+        await communicate.save(output_file)
+        print(f"\n语音文件已保存为：{output_file}")
     except Exception as e:
         print(f"语音合成失败：{str(e)}")
-        return False
-
-def generate_audio_for_story(story: str, story_type: int, chapter_num: int = None) -> str:
-    """为故事生成语音文件"""
-    # 创建 audio 目录（如果不存在）
-    audio_dir = "audio"
-    if not os.path.exists(audio_dir):
-        os.makedirs(audio_dir)
-    
-    # 生成文件名
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    if story_type == 1:  # 单元剧
-        filename = f"{audio_dir}/story_{timestamp}.mp3"
-    else:  # 连续剧
-        filename = f"{audio_dir}/chapter_{chapter_num}_{timestamp}.mp3"
-    
-    # 选择合适的声音
-    voice = "zh-CN-XiaoxiaoNeural"  # 默认使用晓晓的声音
-    
-    # 合成语音
-    print("\n正在生成语音...")
-    success = asyncio.run(text_to_speech(story, filename, voice))
-    
-    if success:
-        print(f"语音已生成：{filename}")
-        return filename
-    else:
-        print("语音生成失败，请稍后重试。")
-        return None
 
 def main():
     try:
@@ -393,7 +361,7 @@ def main():
                 if 1 <= choice <= 6:
                     setting = valid_settings[choice - 1]
                     print(f"\n已选择场景：{setting}")
-                    modify_choice = input("请确认场景？(y/n，直接回车继续)：").strip().lower()
+                    modify_choice = input("是否进行修改？(y/n，直接回车继续)：").strip().lower()
                     if modify_choice == 'y':
                         continue
                     break
@@ -490,11 +458,6 @@ def main():
                         serial_story['current_chapter'] += 1
                         save_serial_story(serial_story)
                         print(f"\n=== 第{serial_story['current_chapter']}章 ===\n{chapter}\n")
-                        
-                        # 生成语音
-                        audio_file = generate_audio_for_story(chapter, story_type, serial_story['current_chapter'])
-                        if audio_file:
-                            print(f"\n你可以用播放器打开 {audio_file} 来听这一章。")
                     return
                 
                 elif choice == 3:  # 查看完整故事
@@ -528,10 +491,16 @@ def main():
             story = generate_story(final_prompt)
             print("=== 睡前故事 ===\n" + story + "\n")
             
-            # 生成语音
-            audio_file = generate_audio_for_story(story, story_type)
-            if audio_file:
-                print(f"\n你可以用播放器打开 {audio_file} 来听这个故事。")
+            # 询问是否需要语音合成
+            tts_choice = input("是否需要将故事转换为语音？(y/n)：").strip().lower()
+            if tts_choice == 'y':
+                # 生成输出文件名
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_file = f"story_{timestamp}.mp3"
+                
+                print("\n正在生成语音，请稍候...")
+                # 运行语音合成
+                asyncio.run(text_to_speech(story, output_file))
         
         else:  # 连续剧
             # 开始新的连续剧
@@ -558,10 +527,16 @@ def main():
                 save_serial_story(serial_story)
                 print("\n=== 第1章 ===\n" + chapter + "\n")
                 
-                # 生成语音
-                audio_file = generate_audio_for_story(chapter, story_type, 1)
-                if audio_file:
-                    print(f"\n你可以用播放器打开 {audio_file} 来听这一章。")
+                # 询问是否需要语音合成
+                tts_choice = input("是否需要将这一章转换为语音？(y/n)：").strip().lower()
+                if tts_choice == 'y':
+                    # 生成输出文件名
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    output_file = f"chapter1_{timestamp}.mp3"
+                    
+                    print("\n正在生成语音，请稍候...")
+                    # 运行语音合成
+                    asyncio.run(text_to_speech(chapter, output_file))
             return
 
     except ValueError as e:
